@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8">
+<title>لوحة تحكم المفاتيح - NIRVANA TWEAK</title>
+<style>
+  body { font-family: Tahoma, Arial, sans-serif; background:#111; color:#eee; padding:20px; }
+  h1 { color:#a855f7; }
+  input, button { padding:8px; margin:4px 0; border-radius:6px; border:1px solid #444; background:#1c1c1c; color:#eee; }
+  button { background:#a855f7; color:#fff; cursor:pointer; border:none; padding:8px 14px; }
+  button:hover { background:#9333ea; }
+  table { border-collapse: collapse; width:100%; margin-top:20px; }
+  th, td { border:1px solid #333; padding:8px; text-align:center; font-size:14px; }
+  th { background:#1c1c1c; color:#a855f7; }
+  .used { color:#4ade80; }
+  .free { color:#888; }
+  .banned { color:#f87171; font-weight:bold; }
+  .ok { color:#4ade80; }
+  .err { color:#f87171; }
+  #loginBox { max-width:400px; margin:auto; margin-top:60px; }
+  .actionBtn { padding:4px 8px; font-size:12px; margin:2px; }
+</style>
+</head>
+<body>
+
+<div id="loginBox">
+  <h1>🔐 دخول الإدارة</h1>
+  <input id="secretInput" type="password" placeholder="كلمة السر الإدارية" style="width:100%;"><br>
+  <button onclick="login()" style="width:100%;">دخول</button>
+  <p id="loginMsg"></p>
+</div>
+
+<div id="dashboard" style="display:none;">
+  <h1>🗝️ لوحة تحكم المفاتيح</h1>
+  <p id="statusMsg"></p>
+
+  <div>
+    <h3>حظر جهاز</h3>
+    <input id="banHwid" placeholder="Hardware ID">
+    <button onclick="banDevice()">حظر</button>
+    <button onclick="unbanDevice()">رفع الحظر</button>
+  </div>
+
+  <div>
+    <h3>الأجهزة المحظورة حالياً</h3>
+    <ul id="bansList"></ul>
+  </div>
+
+  <h3>🔑 إضافة / توليد مفتاح</h3>
+  <div>
+    <button onclick="generateKey()">➕ توليد مفتاح جديد تلقائياً</button>
+  </div>
+  <div style="margin-top:10px;">
+    <input id="customKey" placeholder="اكتب مفتاح مخصص (اختياري)" style="width:220px;">
+    <input id="customLabel" placeholder="اسم/رقم (اختياري)" style="width:120px;">
+    <button onclick="addCustomKey()">إضافة يدوياً</button>
+  </div>
+  <p id="keyActionMsg"></p>
+
+  <h3>قائمة المفاتيح (<span id="keyCount">0</span>)</h3>
+  <button onclick="loadKeys()">🔄 تحديث</button>
+  <table>
+    <thead>
+      <tr>
+        <th>المفتاح</th>
+        <th>الاسم/الرقم</th>
+        <th>الحالة</th>
+        <th>مرات الاستخدام</th>
+        <th>Hardware ID</th>
+        <th>تعديل الاسم</th>
+        <th>حذف</th>
+      </tr>
+    </thead>
+    <tbody id="keysBody"></tbody>
+  </table>
+</div>
+
+<script>
+let SECRET = '';
+
+function login() {
+  SECRET = document.getElementById('secretInput').value;
+  fetch('/admin/keys', { headers: { 'x-admin-secret': SECRET } })
+    .then(r => {
+      if (!r.ok) throw new Error('wrong');
+      document.getElementById('loginBox').style.display = 'none';
+      document.getElementById('dashboard').style.display = 'block';
+      loadKeys();
+      loadBans();
+    })
+    .catch(() => {
+      document.getElementById('loginMsg').innerText = '❌ كلمة سر غلط';
+    });
+}
+
+function loadKeys() {
+  fetch('/admin/keys', { headers: { 'x-admin-secret': SECRET } })
+    .then(r => r.json())
+    .then(data => {
+      const body = document.getElementById('keysBody');
+      body.innerHTML = '';
+      document.getElementById('keyCount').innerText = data.keys.length;
+      data.keys.forEach(k => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${k.key}</td>
+          <td>${k.label || '-'}</td>
+          <td class="${k.used ? 'used' : 'free'}">${k.used ? 'مُفعّل' : 'متاح'}</td>
+          <td>${k.uses || 0} / 5</td>
+          <td>${k.hwid || '-'}</td>
+          <td>
+            <input type="text" placeholder="اسم" style="width:70px" id="label-${k.key}">
+            <button class="actionBtn" onclick="setLabel('${k.key}')">حفظ</button>
+          </td>
+          <td><button class="actionBtn" style="background:#f87171" onclick="deleteKey('${k.key}')">🗑️</button></td>
+        `;
+        body.appendChild(tr);
+      });
+    });
+}
+
+function generateKey() {
+  fetch('/admin/generate-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-secret': SECRET },
+    body: JSON.stringify({})
+  })
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('keyActionMsg').innerHTML = `<span class="ok">✅ تم توليد المفتاح: ${data.key.key}</span>`;
+      loadKeys();
+    });
+}
+
+function addCustomKey() {
+  const key = document.getElementById('customKey').value.trim();
+  const label = document.getElementById('customLabel').value.trim();
+  if (!key) {
+    document.getElementById('keyActionMsg').innerHTML = `<span class="err">❌ اكتب المفتاح أول</span>`;
+    return;
+  }
+  fetch('/admin/add-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-secret': SECRET },
+    body: JSON.stringify({ key, label })
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.success) {
+        document.getElementById('keyActionMsg').innerHTML = `<span class="ok">✅ تمت الإضافة</span>`;
+        document.getElementById('customKey').value = '';
+        document.getElementById('customLabel').value = '';
+      } else {
+        document.getElementById('keyActionMsg').innerHTML = `<span class="err">❌ ${data.message}</span>`;
+      }
+      loadKeys();
+    });
+}
+
+function deleteKey(key) {
+  if (!confirm('متأكد تبي تحذف هذا المفتاح؟')) return;
+  fetch('/admin/delete-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-secret': SECRET },
+    body: JSON.stringify({ key })
+  }).then(() => loadKeys());
+}
+
+function setLabel(key) {
+  const label = document.getElementById('label-' + key).value;
+  fetch('/admin/label', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-secret': SECRET },
+    body: JSON.stringify({ key, label })
+  }).then(() => loadKeys());
+}
+
+function loadBans() {
+  fetch('/admin/bans', { headers: { 'x-admin-secret': SECRET } })
+    .then(r => r.json())
+    .then(data => {
+      const list = document.getElementById('bansList');
+      list.innerHTML = '';
+      data.bans.forEach(hwid => {
+        const li = document.createElement('li');
+        li.className = 'banned';
+        li.innerText = hwid;
+        list.appendChild(li);
+      });
+    });
+}
+
+function banDevice() {
+  const hwid = document.getElementById('banHwid').value.trim();
+  if (!hwid) return;
+  fetch('/admin/ban', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-secret': SECRET },
+    body: JSON.stringify({ hwid })
+  }).then(() => { loadBans(); document.getElementById('statusMsg').innerText = '✅ تم حظر الجهاز'; });
+}
+
+function unbanDevice() {
+  const hwid = document.getElementById('banHwid').value.trim();
+  if (!hwid) return;
+  fetch('/admin/unban', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-admin-secret': SECRET },
+    body: JSON.stringify({ hwid })
+  }).then(() => { loadBans(); document.getElementById('statusMsg').innerText = '✅ تم رفع الحظر'; });
+}
+</script>
+</body>
+</html>
